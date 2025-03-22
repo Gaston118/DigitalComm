@@ -1,20 +1,29 @@
-import numpy as np
-import matplotlib.pyplot as plt
+import random
 
-def lanzar_tres_monedas():
-    monedas = np.random.randint(0, 2, size=3)  # 0 representa "cara" y 1 representa "cruz"
-    return np.sum(monedas)
+def lanzar_moneda():
+    return random.choice([0, 1])
 
-num_muestras = 10000
-muestras = [lanzar_tres_monedas() for _ in range(num_muestras)]
+def tres_monedas(num_lanzamientos):
+    resultados = []
+    for _ in range(num_lanzamientos):
+        suma = lanzar_moneda() + lanzar_moneda() + lanzar_moneda()
+        resultados.append(suma)
+    
+    valores_unicos = sorted(set(resultados))
+    conteos = {valor: resultados.count(valor) for valor in valores_unicos}
+    prob_acumulada = []
+    acumulado = 0
+    for valor in valores_unicos:
+        acumulado += conteos[valor] / num_lanzamientos
+        prob_acumulada.append(acumulado)
+    
+    def F_x(x):
+        return sum(p for v, p in zip(valores_unicos, prob_acumulada) if x >= v)
+    
+    return valores_unicos, prob_acumulada, F_x
 
+num_lanzamientos = 1000000
+valores, F_x_vals, F_x = tres_monedas(num_lanzamientos)
 
-valores_unicos, conteos = np.unique(muestras, return_counts=True)
-probabilidades = conteos / num_muestras
-cdf = np.cumsum(probabilidades)
-
-plt.step(valores_unicos, cdf, where='post')
-plt.xlabel('Valor de la variable aleatoria')
-plt.ylabel('Probabilidad acumulada')
-plt.grid(True)
-plt.show()
+print("Valores posibles:", valores)
+print("FDC:", F_x_vals)
