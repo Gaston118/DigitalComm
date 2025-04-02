@@ -3,7 +3,7 @@ import random
 def lanzar_moneda():
     return random.choice(['cara', 'cruz'])
 
-num_lanzamientos = 1000000
+num_lanzamientos = 10000000
 
 def dos_monedas(num_lanzamientos):
     conteo = 0

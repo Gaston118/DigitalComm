@@ -3,7 +3,7 @@ import random
 def lanzar_dado():
     return random.randint(1, 6)
 
-num_lanzamientos = 1000000
+num_lanzamientos = 10000000
 
 def calcular(num_lanzamientos):
     conteo = 0

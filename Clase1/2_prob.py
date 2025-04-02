@@ -3,7 +3,7 @@ import random
 def lanzar_dado():
     return random.randint(1, 6)
 
-num_lanzamientos = 1000000
+num_lanzamientos = 10000000
 
 #ENTIENDO QUE EL EJERCICIO PIDE QUE SE LANZEN DOS DADOS 
 #Y SE CALCULE LA PROBABILIDAD DE QUE LA SUMA DE LOS DOS DADOS SEA PAR
