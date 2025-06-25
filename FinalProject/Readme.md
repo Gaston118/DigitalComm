@@ -14,42 +14,101 @@ En este artículo se realiza, por primera vez, una descripción teórica riguros
 
 ---
 
+## 🔍 Objetivo del Paper
+
+La modulación utilizada por **LoRa**, una tecnología clave en redes **LPWAN** (Low Power Wide Area Networks), ha sido históricamente poco documentada en términos teóricos. Los objetivos principales del paper son:
+
+- Proporcionar por primera vez una **descripción matemática rigurosa** de la modulación LoRa
+- Definir formalmente la **Frequency Shift Chirp Modulation (FSCM)**
+- Proponer un **demodulador óptimo** de baja complejidad usando FFT
+- Comparar el rendimiento frente a FSK en canales planos y selectivos
+
+---
+
 ## 📚 Teoría Clave del Paper
 
-### ✅ 1. Modulación FSCM
+### ✅ 1. Spreading Factor (SF)
 
-Para un símbolo s ∈ {0, 1, ..., 2^SF - 1}, la señal transmitida es:
+El **Spreading Factor** es un parámetro fundamental que determina:
+- La **cantidad de bits por símbolo**
+- Denotado por SF ∈ {7, 8, 9, 10, 11, 12}
+- Cada símbolo representa M = 2^SF posibles valores
+- Por lo tanto: log₂(M) = SF bits por símbolo
 
-```
-c[n] = (1/√(2^SF)) · exp(j·2π·[((s + n) mod 2^SF)/2^SF]·n)
-```
+**Ejemplo**: Para SF = 7 → M = 128 símbolos → 7 bits por símbolo
 
-donde:
-- **SF**: *Spreading Factor* (factor de dispersión, típico entre 7 y 12)
-- **n**: índice de muestra en el intervalo de símbolo
-- Esta fórmula genera una **chirp ascendente con un corrimiento de frecuencia** proporcional al símbolo transmitido
+### ✅ 2. Modulación FSCM: Chirps con Corrimiento
 
-### ✅ 2. Demodulación óptima
+Para transmitir un símbolo s ∈ {0, 1, ..., M-1}, se genera una señal tipo **chirp**, cuya frecuencia aumenta linealmente con el tiempo, pero con un **corrimiento inicial de frecuencia** dependiente de s.
 
-El proceso de demodulación consiste en:
-
-1. **Multiplicación**: Se multiplica la señal recibida por un **chirp descendente** (down-chirp), que es el inverso del chirp base
-2. **Transformada de Fourier**: Se calcula la **FFT** del resultado
-3. **Detección**: El índice del pico de la FFT indica el símbolo transmitido
-
-### ✅ 3. Modelo de canal selectivo
-
-El canal multipath considerado tiene una respuesta al impulso:
+#### 🔧 Fórmula de la señal transmitida:
 
 ```
-h[n] = √(0.8) · δ[n] + √(0.2) · δ[n - 1]
+c[n] = (1/√M) · exp(j·2π·[(s + n) mod M]/M · n)
 ```
 
-Este canal introduce:
-- **Interferencia intersimbólica (ISI)**
-- **Atenuación selectiva en frecuencia**
+Donde:
+- **n** ∈ {0, 1, ..., M-1} es el índice temporal discreto
+- **T** = 1/B es el período de muestreo
+- **M** = 2^SF: cantidad total de símbolos posibles
+- **s**: símbolo a transmitir
 
-Esto afecta negativamente al FSK pero **no tanto al FSCM**, que barre todo el ancho de banda.
+#### 📌 Interpretación física:
+- Es una **señal chirp discreta** con corrimiento de frecuencia
+- La información está codificada como un **desplazamiento de frecuencia inicial**
+- Se diferencia de los chirps clásicos al ser modulada en frecuencia por la posición s
+- El chirp "barre" todo el ancho de banda disponible
+
+### ✅ 3. Ortogonalidad de las Señales Chirp
+
+El paper demuestra matemáticamente que las M señales chirp generadas para cada símbolo son **ortogonales entre sí** en el dominio discreto:
+
+```
+⟨c_i[n], c_q[n]⟩ = 0    para i ≠ q
+```
+
+**Importancia**: Esta ortogonalidad es esencial para asegurar una detección sin interferencia entre símbolos y permite la separación perfecta en condiciones ideales.
+
+### ✅ 4. Demodulación Óptima ("Dechirping")
+
+El proceso óptimo de demodulación, conocido como **"dechirping"**, consiste en:
+
+#### Paso 1: Multiplicación por chirp descendente
+```
+d[n] = r[n] · exp(-j·2π·n²/M)
+```
+
+#### Paso 2: Transformada de Fourier
+- Se calcula la **FFT** de d[n]
+- El resultado es: **FFT{d[n]}**
+
+#### Paso 3: Detección del símbolo
+- El índice del **máximo de la FFT** corresponde al símbolo transmitido ŝ
+- **ŝ = arg max|FFT{d[n]}|**
+
+#### 🔧 Ventajas del demodulador:
+- **Baja complejidad**: O(M log M) usando FFT
+- **Óptimo**: Maximiza la relación señal-ruido
+- **Robusto**: Efectivo en canales adversos
+
+### ✅ 5. Modelos de Canal Considerados
+
+#### a) **Canal Plano (AWGN)**:
+```
+r[n] = c[n] + w[n]
+```
+- Canal aditivo con ruido blanco gaussiano (modelo ideal)
+- No afecta frecuencias de forma selectiva
+- **w[n]**: ruido gaussiano complejo
+
+#### b) **Canal Selectivo en Frecuencia**:
+```
+h[n] = √(0.8) · δ[n] + √(0.2) · δ[n-1]
+```
+- Representa un **canal multipath** con dos trayectorias
+- Trayectoria directa: 80% de la energía
+- Trayectoria reflejada: 20% de la energía, con retraso de 1 muestra
+- Genera **desvanecimiento selectivo** que degrada FSK pero no tanto FSCM
 
 ---
 
@@ -66,176 +125,209 @@ Esto afecta negativamente al FSK pero **no tanto al FSCM**, que barre todo el an
 | Número de símbolos       | 20,000       | Para estadísticas confiables  |
 | Número de bits           | 140,000      | SF × Número de símbolos       |
 
-### ⚙️ Flujo de simulación
+### ⚙️ Flujo de simulación detallado
 
-1. **Generación de datos**: Creación de bits aleatorios para transmitir
+#### 1. **Generación de datos**
+```python
+# Generación de bits aleatorios
+bits = np.random.randint(0, 2, num_bits)
+```
 
-2. **Codificación LoRa**: Los bits se agrupan de a 7 (SF=7) para formar símbolos enteros
+#### 2. **Codificación LoRa**
+```python
+# Agrupación de bits en símbolos
+symbols = []
+for i in range(0, len(bits), SF):
+    symbol = sum(bits[i+j] * (2**j) for j in range(SF))
+    symbols.append(symbol)
+```
 
-3. **Modulación FSCM**: Aplicación de la fórmula del chirp para cada símbolo
+#### 3. **Modulación FSCM**
+```python
+# Generación de señales chirp para cada símbolo
+def generate_chirp(symbol, SF):
+    M = 2**SF
+    n = np.arange(M)
+    return (1/np.sqrt(M)) * np.exp(1j * 2 * np.pi * ((symbol + n) % M) / M * n)
+```
 
-4. **Canal de transmisión**:
-   - Adición de ruido AWGN en distintos niveles de SNR (Eb/N0)
-   - Aplicación del canal multipath (para el caso selectivo)
+#### 4. **Canal de transmisión**
+- **Canal AWGN**: Adición de ruido gaussiano complejo
+- **Canal selectivo**: Convolución con respuesta al impulso h[n]
 
-5. **Demodulación**:
-   - Multiplicación por el chirp descendente
-   - Cálculo de la FFT
-   - Detección del símbolo como el índice del máximo
-
-6. **Decodificación**: Conversión de símbolos de vuelta a bits
-
-7. **Análisis de rendimiento**:
-   - Cálculo de tasas de error BER y SER
-   - Generación de curvas de rendimiento
-
----
-
-## 📊 Resultados Esperados
-
-El script debe producir gráficas que muestren:
-
-### Curvas de rendimiento típicas:
-
-- **Eje X**: SNR (Signal-to-Noise Ratio) en dB
-- **Eje Y**: Tasa de error (BER/SER) en escala logarítmica
-- **Líneas**:
-  - BER en canal AWGN (plano)
-  - SER en canal AWGN (plano)
-  - BER en canal selectivo en frecuencia
-  - SER en canal selectivo en frecuencia
-
-### Observaciones clave esperadas:
-
-1. **Canal plano (AWGN)**: BER y SER son similares para FSCM, concordando con los resultados del paper
-
-2. **Canal selectivo en frecuencia**:
-   - La BER de FSCM es significativamente menor que la SER
-   - Esto confirma la **robustez superior** de FSCM
-   - Demuestra la ventaja del barrido de espectro (chirp) para combatir la distorsión selectiva
-
-3. **Comparación general**: Las curvas muestran claramente la **superioridad del FSCM** sobre modulaciones convencionales en canales con desvanecimiento selectivo
+#### 5. **Demodulación FSCM**
+```python
+def demodulate_fscm(received_signal, SF):
+    M = 2**SF
+    n = np.arange(M)
+    # Dechirping
+    dechirped = received_signal * np.exp(-1j * 2 * np.pi * n**2 / M)
+    # FFT
+    fft_result = np.fft.fft(dechirped)
+    # Detección
+    detected_symbol = np.argmax(np.abs(fft_result))
+    return detected_symbol
+```
 
 ---
 
-## 📈 Comparación con el Paper Original
+## 📊 Resultados y Análisis
 
-| Aspecto                       | Paper de Vangelista | Implementación Propia |
-|-------------------------------|--------------------|-----------------------|
-| Modulación                    | FSCM               | FSCM                  |
-| Canal plano (AWGN)           | ✔️                 | ✔️                    |
-| Canal selectivo en frecuencia | ✔️                 | ✔️                    |
-| Métricas mostradas           | Solo BER           | BER y SER             |
-| Rango de SNR                 | -12 dB a -1 dB     | -10 dB a +6 dB        |
-| Modelo de canal              | Multipath simple   | Multipath simple      |
+### Curvas de rendimiento esperadas:
 
----
+**Configuración típica**:
+- **Eje X**: Eb/N0 (dB) - Relación energía por bit a densidad de ruido
+- **Eje Y**: BER/SER (escala logarítmica)
+- **Rango**: -10 dB a +6 dB
 
-## 🔬 Conceptos Técnicos Clave
+### Observaciones clave del paper:
 
-### Frequency Shift Chirp Modulation (FSCM)
+#### 1. **Canal AWGN (Plano)**:
+- FSCM y FSK tienen **rendimiento similar**
+- BER y SER siguen curvas típicas de modulación M-aria
+- Concordancia con la teoría clásica de comunicaciones
 
-- **Principio**: Cada símbolo se representa por un chirp (barrido de frecuencia) con un desplazamiento inicial específico
-- **Ventaja**: El barrido completo del ancho de banda proporciona diversidad en frecuencia
-- **Robustez**: Resistente a la interferencia selectiva en frecuencia
+#### 2. **Canal Selectivo en Frecuencia**:
+- **FSCM supera claramente a FSK**
+- La BER de FSCM es significativamente menor que FSK
+- Ventaja se debe al **barrido completo del espectro**
 
-### Spreading Factor (SF)
-
-- **Definición**: Determina la duración del símbolo y la cantidad de información por símbolo
-- **Relación**: SF = log₂(M), donde M es el número de símbolos posibles
-- **Compromiso**: Mayor SF → mayor robustez pero menor tasa de datos
-
-### Canal Selectivo en Frecuencia
-
-- **Causa**: Multitrayectoria en la propagación de la señal
-- **Efecto**: Diferentes frecuencias experimentan atenuaciones distintas
-- **Impacto**: Degrada el rendimiento de modulaciones de banda estrecha (como FSK)
+#### 3. **Robustez de FSCM**:
+- El barrido de frecuencias **promedia los efectos del canal**
+- Resistente a desvanecimientos selectivos
+- Mantiene rendimiento en condiciones adversas
 
 ---
 
-## 🧪 Extensiones Posibles
+## 📈 Comparación Detallada: FSCM vs FSK
 
-### Mejoras en la simulación:
-- ✅ Incluir modulación **FSK** para comparación directa
-- ✅ Simular diferentes **valores de SF** (8, 9, 10, 11, 12)
-- ✅ Implementar **canales más realistas**: Rayleigh, Rice, con efecto Doppler
-
-### Análisis adicionales:
-- ✅ Evaluar rendimiento **con codificación de canal** (Hamming, LoRaWAN FEC)
-- ✅ Implementar detección **no coherente** o basada en energía
-- ✅ Analizar el **espectro de potencia** de las señales FSCM
-
-### Optimizaciones:
-- ✅ Estudiar el **sincronismo** y estimación de canal
-- ✅ Implementar **técnicas de ecualización**
-- ✅ Analizar el **rendimiento en redes multi-usuario**
+| Característica              | FSCM (LoRa)                           | FSK Tradicional                       |
+|-----------------------------|---------------------------------------|---------------------------------------|
+| **Base matemática**         | Chirp con desplazamiento             | Portadoras sinusoidales               |
+| **Ortogonalidad**           | ✔️ Sí (demostrada en el paper)        | ✔️ Sí (por frecuencia)                |
+| **Robustez en multipath**   | 🟢 Alta (barre todas las frecuencias) | 🔴 Baja (puede caer en frecuencias atenuadas) |
+| **Complejidad demodulación**| Baja (uso de FFT)                     | Media (banco de correladores)         |
+| **Ancho de banda**          | Totalmente utilizado                  | Utiliza una porción por símbolo       |
+| **Diversidad en frecuencia**| ✔️ Inherente                          | ❌ No disponible                      |
+| **Sincronización**          | Menos crítica                         | Más crítica                           |
 
 ---
 
-## 📚 Fundamentos Matemáticos
+## 🔬 Fundamentos Matemáticos Avanzados
 
 ### Señal Chirp Base
 
-La señal chirp fundamental utilizada en LoRa es:
+La señal chirp fundamental utilizada en LoRa puede expresarse como:
 
 ```
-c₀[n] = exp(j·2π·(n²/2N)), n = 0, 1, ..., N-1
+c₀[n] = exp(j·π·n²/M)  para n = 0, 1, ..., M-1
 ```
-
-donde N = 2^SF es el número de muestras por símbolo.
 
 ### Modulación por Desplazamiento Circular
 
 Para transmitir un símbolo s, se aplica un desplazamiento circular:
 
 ```
-cₛ[n] = c₀[(n + s) mod N]
+cₛ[n] = c₀[(n + s) mod M]
 ```
 
-### Correlación Cruzada
+### Propiedades de Correlación
 
-La demodulación se basa en la correlación cruzada entre la señal recibida y el chirp de referencia, aprovechando las propiedades de ortogonalidad de los chirps desplazados.
+La correlación cruzada entre diferentes símbolos FSCM satisface:
 
----
+```
+R_ij = (1/M) · Σ(n=0 to M-1) cᵢ[n] · cⱼ*[n] = δᵢⱼ
+```
 
-## 🔍 Análisis de Complejidad
+donde δᵢⱼ es la delta de Kronecker.
 
-### Complejidad computacional:
-- **Modulación**: O(N) por símbolo
-- **Demodulación**: O(N log N) por símbolo (debido a la FFT)
-- **Total**: Dominado por la FFT en la demodulación
+### Respuesta en Frecuencia
 
-### Eficiencia espectral:
-- **Tasa de bits**: SF bits por símbolo
-- **Ancho de banda**: Fijo (125 kHz típico)
-- **Eficiencia**: Decrece con SF mayor, pero aumenta la robustez
+El espectro de potencia de una señal FSCM es aproximadamente plano sobre el ancho de banda B, lo que proporciona diversidad en frecuencia natural.
 
 ---
 
-## 📌 Referencias y Recursos
+## 🧪 Extensiones y Mejoras Posibles
+
+### Análisis adicionales del paper:
+- ✅ **Codificación de canal**: Hamming, Reed-Solomon, LoRaWAN FEC
+- ✅ **Diferentes valores de SF**: Análisis de 7 a 12
+- ✅ **Canales más complejos**: Rayleigh, Rice, con efecto Doppler
+- ✅ **Detección no coherente**: Basada en energía vs coherente
+
+### Optimizaciones propuestas:
+- ✅ **Sincronización**: Estimación de offset de frecuencia y tiempo
+- ✅ **Ecualización**: Técnicas para canales selectivos más complejos
+- ✅ **Redes multi-usuario**: Análisis de interferencia y capacidad
+- ✅ **Implementación en tiempo real**: GNU Radio, USRP
+
+---
+
+## 🔍 Análisis de Complejidad Computacional
+
+### Modulación FSCM:
+- **Operaciones por símbolo**: O(M) multiplicaciones complejas
+- **Memoria requerida**: O(M) muestras complejas
+- **Implementación**: Tabla de lookup para exponenciales
+
+### Demodulación FSCM:
+- **Dechirping**: O(M) multiplicaciones complejas
+- **FFT**: O(M log M) operaciones
+- **Detección**: O(M) comparaciones
+- **Total**: O(M log M) por símbolo
+
+### Comparación con FSK:
+- **FSK modulación**: O(1) por símbolo
+- **FSK demodulación**: O(M) correlaciones → O(M²) total
+- **Ventaja FSCM**: Escalabilidad logarítmica vs cuadrática
+
+---
+
+## 📌 Conclusiones del Paper Original
+
+1. **Primera formalización teórica**: Se provee una descripción matemática rigurosa de la modulación LoRa (FSCM)
+
+2. **Receptor óptimo eficiente**: Se define un demodulador basado en FFT que es óptimo y de baja complejidad
+
+3. **Superioridad en canales adversos**: Se confirma que FSCM es más robusto que FSK en canales selectivos en frecuencia
+
+4. **Validación para IoT**: Los resultados validan su uso en aplicaciones IoT y LPWAN, donde las condiciones del canal suelen ser adversas
+
+5. **Diversidad inherente**: El barrido de frecuencias proporciona diversidad natural que mejora la robustez
+
+---
+
+## 🎯 Aplicaciones Prácticas
+
+### Tecnologías que usan FSCM:
+- **LoRaWAN**: Redes de área amplia de baja potencia
+- **Semtech LoRa**: Chips de comunicación IoT
+- **Aplicaciones IoT**: Sensores, medidores inteligentes, agricultura
+- **Comunicaciones satelitales**: Adaptación para enlaces de larga distancia
+
+### Ventajas en implementaciones reales:
+- **Bajo consumo de energía**: Eficiencia en dispositivos battery-powered
+- **Largo alcance**: Comunicación de varios kilómetros
+- **Penetración en edificios**: Robustez en entornos urbanos
+- **Tolerancia a interferencia**: Coexistencia con otras tecnologías
+
+---
+
+## 📚 Referencias 
 
 ### Referencia principal:
-1. **Vangelista, L. (2017)**. *"Frequency Shift Chirp Modulation: The LoRa Modulation"*. IEEE Signal Processing Letters, Vol. 24, No. 12.
-
-### Referencias complementarias:
-2. **LoRa Alliance**. *LoRaWAN Specification v1.0.4*
-3. **Semtech Corporation**. *LoRa Modulation Basics*
-4. **Reynders, B., et al. (2016)**. *"Chirp spread spectrum as a modulation technique for long range communication"*
-
-### Herramientas de simulación:
-- **Python**: NumPy, SciPy, Matplotlib
-- **MATLAB**: Communications Toolbox
-- **GNU Radio**: Implementación en tiempo real
+1. **Vangelista, L. (2017)**. *"Frequency Shift Chirp Modulation: The LoRa Modulation"*. IEEE Signal Processing Letters, Vol. 24, No. 12. DOI: 10.1109/LSP.2017.2762960
 
 ---
 
-## 💡 Conclusiones
+## 💡 Resumen Ejecutivo
 
-La modulación FSCM utilizada en LoRa demuestra ventajas significativas en canales con desvanecimiento selectivo en frecuencia debido a:
+La modulación **Frequency Shift Chirp Modulation (FSCM)** utilizada en LoRa representa un avance significativo en las comunicaciones digitales para aplicaciones IoT. El paper de Vangelista proporciona por primera vez una base teórica sólida que explica por qué LoRa es tan efectivo en condiciones adversas:
 
-1. **Diversidad en frecuencia**: El barrido completo del ancho de banda
-2. **Robustez ante interferencia**: Resistencia a la interferencia de banda estrecha
-3. **Simplicidad de implementación**: Demodulación eficiente mediante FFT
-4. **Escalabilidad**: Ajuste flexible del compromiso robustez-tasa de datos mediante SF
+**Factores clave de éxito**:
+1. **Diversidad en frecuencia inherente** mediante el barrido completo del espectro
+2. **Ortogonalidad matemática** que permite detección sin interferencia
+3. **Demodulación eficiente** usando FFT para baja complejidad computacional
+4. **Robustez ante canales selectivos** que degradan otras modulaciones
 
-Estas características hacen de FSCM una elección excelente para aplicaciones IoT de largo alcance y baja potencia.
+Estas características fundamentales hacen de FSCM la elección ideal para el ecosistema IoT moderno, donde se requiere comunicación confiable de largo alcance con dispositivos de baja potencia en entornos desafiantes.
