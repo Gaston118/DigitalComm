@@ -87,9 +87,11 @@ El paper demuestra matemáticamente que las M señales chirp generadas para cada
 
 ### ✅ 4. Demodulación Óptima de Señales FSCM en Canales de Ruido Gaussiano Blanco Aditivo (AWGN)
 
-◦ La señal recibida r(nTs + kT) es la señal transmitida c(nTs + kT) más un ruido gaussiano blanco w(nTs + kT).
-◦ El demodulador óptimo consiste en proyectar la señal recibida r(nTs + kT) sobre cada una de las posibles señales c(nTs + kT)|s(nTs)=q, para q = 0, ..., 2^SF - 1.
-◦ Luego, se elige la señal c(nTs + kT)|s(nTs)=l para la cual el módulo (cuadrado) de la proyección es máximo. Esta l es la mejor estimación del símbolo transmitido s(nTs)
+- La señal recibida r(nTs + kT) es la señal transmitida c(nTs + kT) más un ruido gaussiano blanco w(nTs + kT).
+
+- El demodulador óptimo consiste en proyectar la señal recibida r(nTs + kT) sobre cada una de las posibles señales c(nTs + kT)|s(nTs)=q, para q = 0, ..., 2^SF - 1.
+
+- Luego, se elige la señal c(nTs + kT)|s(nTs)=l para la cual el módulo (cuadrado) de la proyección es máximo. Esta l es la mejor estimación del símbolo transmitido s(nTs)
 
 El proceso óptimo de demodulación, conocido como **"dechirping"**, consiste en:
 
