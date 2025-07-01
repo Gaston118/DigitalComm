@@ -195,6 +195,17 @@ encoder = np.array([
     for i in range(num_symbols)
 ])
 ```
+Ejemplo:
+```python
+SF = 4                    # bits por símbolo
+bits_tx = np.array([1,0,1,1,   0,1,0,0])  # 2 símbolos => num_symbols = 2
+
+j = 0 → bit = 1  << 3 = 8
+j = 1 → bit = 0  << 2 = 0
+j = 2 → bit = 1  << 1 = 2
+j = 3 → bit = 1  << 0 = 1
+suma = 8 + 0 + 2 + 1 = 11
+```
 
 **Comparación con Ecuación (1) del paper:**
 ```
