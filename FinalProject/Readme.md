@@ -217,6 +217,8 @@ El código implementa exactamente esta ecuación:
 - `<< (SF-1-j)` = `2^h` (desplazamiento binario equivale a multiplicar por potencia de 2)
 - El resultado es `s(nTs)` que toma valores en {0, 1, 2, ..., 2^SF - 1}
 
+#### La Ecuación 1 explica cómo un conjunto de SF bits binarios se codifica en un único valor numérico, s(nTs). Este valor numérico es crucial porque determina el desplazamiento de frecuencia inicial de la señal chirp transmitida.
+
 ## Formación de la Forma de Onda (Waveform Former)
 
 ```python
