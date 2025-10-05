@@ -1,8 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-# GENERACION DE LORA SYMBOLS.
-
 SF = 7
 M = 2**SF
 B = 125e3         # Ancho de banda
