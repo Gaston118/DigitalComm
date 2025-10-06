@@ -12,4 +12,3 @@ CRC = 0     # Sin CRC
 
 # Codificación LoRa
 encoded_symbols = lora_encode(payload, SF, CR, DE, IH, CRC, verbose=1)
-print("Símbolos codificados LoRa:", encoded_symbols)
