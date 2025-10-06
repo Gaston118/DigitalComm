@@ -14,4 +14,4 @@ from .Whitening import *
 from .Gray import *
 from .Transmitter import *
 
-__all__ = ['hamming_encode', 'interleaver', 'whitening', 'gray_encode', 'lora_encode']
+__all__ = ['hamming_encode', 'interleaver', 'whitening_seq', 'gray_encode', 'lora_encode']

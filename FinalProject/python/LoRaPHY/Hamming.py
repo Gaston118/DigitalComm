@@ -1,56 +1,80 @@
 import numpy as np
 
-def hamming_encode(bits, CR=4/8):
+def bit_reduce_xor(nibble, positions):
+    """Reduce bits in 'positions' (1-based) of nibble by XOR."""
+    val = 0
+    for pos in positions:
+        val ^= (nibble >> (pos - 1)) & 1
+    return val
+
+def word_reduce_bitor(bits_and_shifts):
+    """Combine values by OR."""
+    val = 0
+    for b in bits_and_shifts:
+        val |= b
+    return val
+
+def hamming_encode(nibbles, sf=7, cr=4/8):
     """
-    LoRa Hamming encoder.
+    LoRa Hamming encoder (faithful to MATLAB version, CR as fraction 4/x).
     
     Parameters
     ----------
-    bits : array-like
-        Input bits (must be multiple of 4)
-    CR : float
+    nibbles : array-like of uint8
+        Input data (4-bit values 0–15)
+    sf : int
+        Spreading factor
+    cr : float
         Coding rate: 4/5, 4/6, 4/7, or 4/8
     
     Returns
     -------
     np.ndarray
-        Encoded bits
+        Encoded codewords (uint8)
     """
-    bits = np.array(bits, dtype=np.uint8)
-    assert len(bits) % 4 == 0, "Length must be multiple of 4"
-    
-    # Map CR to number of parity bits
+    # Map fractional CR to integer code (1–4)
     cr_map = {4/5: 1, 4/6: 2, 4/7: 3, 4/8: 4}
-    assert CR in cr_map, "CR must be 4/5, 4/6, 4/7, or 4/8"
-    n_parity = cr_map[CR]
+    if cr not in cr_map:
+        raise ValueError("CR must be one of 4/5, 4/6, 4/7, or 4/8")
+    cr_int = cr_map[cr]
     
-    n_blocks = len(bits) // 4
-    out = []
-    
-    for i in range(n_blocks):
-        d1, d2, d3, d4 = bits[4*i : 4*i + 4]
-        
-        # Calculate parity bits (per paper equations 14-15)
-        parities = []
-        
-        if n_parity >= 1:  # CR = 4/5: only p5
-            p5 = d1 ^ d2 ^ d3
-            parities.append(p5)
-        
-        if n_parity >= 2:  # CR = 4/6: p5, p1
-            p1 = d1 ^ d2 ^ d4
-            parities.append(p1)
-        
-        if n_parity >= 3:  # CR = 4/7: p5, p1, p2
-            p2 = d1 ^ d3 ^ d4
-            parities.append(p2)
-        
-        if n_parity == 4:  # CR = 4/8: p5, p1, p2, p3
-            p3 = d2 ^ d3 ^ d4
-            parities.append(p3)
-        
-        # LoRa format: parity bits (MSBs) then data bits (LSBs)
-        codeword = parities + [d1, d2, d3, d4]
-        out.extend(codeword)
-    
-    return np.array(out, dtype=np.uint8)
+    nibbles = np.array(nibbles, dtype=np.uint8)
+    codewords = np.zeros_like(nibbles)
+
+    for i, nibble in enumerate(nibbles, start=1):
+        # parity bits
+        p1 = bit_reduce_xor(nibble, [1, 3, 4])
+        p2 = bit_reduce_xor(nibble, [1, 2, 4])
+        p3 = bit_reduce_xor(nibble, [1, 2, 3])
+        p4 = bit_reduce_xor(nibble, [1, 2, 3, 4])
+        p5 = bit_reduce_xor(nibble, [2, 3, 4])
+
+        # CR for first SF-2 nibbles = 4/8
+        cr_now = 4 if i <= sf - 2 else cr_int
+
+        if cr_now == 1:  # 4/5
+            codewords[i-1] = (p4 << 4) | nibble
+        elif cr_now == 2:  # 4/6
+            codewords[i-1] = word_reduce_bitor([
+                p5 << 5,
+                p3 << 4,
+                nibble
+            ])
+        elif cr_now == 3:  # 4/7
+            codewords[i-1] = word_reduce_bitor([
+                p2 << 6,
+                p5 << 5,
+                p3 << 4,
+                nibble
+            ])
+        elif cr_now == 4:  # 4/8
+            codewords[i-1] = word_reduce_bitor([
+                p1 << 7,
+                p2 << 6,
+                p5 << 5,
+                p3 << 4,
+                nibble
+            ])
+        else:
+            raise ValueError("Invalid Code Rate")
+    return codewords

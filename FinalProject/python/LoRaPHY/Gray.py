@@ -1,37 +1,37 @@
 import numpy as np
 
-def gray_encode(symbols, SF):
+def gray_encode(symbols_i, SF, LDRO=False):
     """
-    Aplica la codificación Gray y un desplazamiento +1 a los valores de los símbolos.
+    Gray encoding with LoRa-specific adjustments.
     
-    Según la Sección 4.4 del paper, LoRa realiza:
-    1. Codificación Gray: gray_val = sym XOR (sym >> 1)
-    2. Sumar 1: final_sym = (gray_val + 1) mod 2^SF
-    
-    Parámetros
+    Parameters
     ----------
-    symbols : array-like
-        Valores de los símbolos provenientes del interleaver (0 a 2^SF - 1)
+    symbols_i : array-like
+        Symbols after interleaving (integers)
     SF : int
-        Factor de expansión (7-12)
+        Spreading Factor
+    LDRO : bool
+        Low Data Rate Optimization flag
         
-    Retorna
+    Returns
     -------
     np.ndarray
-        Símbolos codificados en Gray con el desplazamiento +1
+        Symbols after Gray encoding and LoRa-specific shifting
     """
-    symbols = np.array(symbols, dtype=np.uint16)
-    final_symbols = []
-    
-    for sym in symbols:
-        # Codificación Gray: XOR del símbolo con su versión desplazada un bit a la derecha
-        gray_val = sym ^ (sym >> 1)
-        
-        # Desplazamiento +1 (específico de LoRa)
-        final_sym = (gray_val + 1) % (2**SF)
-        
-        # Agregar el símbolo final a la lista
-        final_symbols.append(final_sym)
-    
-    # Convertir la lista final a un array de numpy
-    return np.array(final_symbols, dtype=np.uint16)
+    symbols_i = np.array(symbols_i, dtype=np.uint16)
+    final_symbols = np.zeros_like(symbols_i, dtype=np.uint16)
+
+    for i, sym in enumerate(symbols_i, start=1):  # MATLAB indices start at 1
+        num = np.uint16(sym)
+        mask = num >> 1
+        while mask != 0:
+            num ^= mask
+            mask >>= 1
+
+        # Aplicar desplazamiento específico de LoRa
+        if i <= 8 or LDRO:
+            final_symbols[i-1] = (num * 4 + 1) % (2**SF)
+        else:
+            final_symbols[i-1] = (num + 1) % (2**SF)
+
+    return final_symbols
