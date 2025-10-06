@@ -10,7 +10,7 @@ def bytes_to_bits(byte_array):
     return np.array(bits, dtype=np.uint8)
 
 
-def lora_encode(payload, SF=7, CR=4/7, LDRO=False, verbose=False):
+def lora_encode(payload, SF=7, CR=4/7, LDRO=False, IH=1, CRC=0, verbose=False):
     """
     Complete LoRa encoding pipeline.
     
@@ -40,7 +40,7 @@ def lora_encode(payload, SF=7, CR=4/7, LDRO=False, verbose=False):
         print(f"Bits de entrada: {len(payload_bits)} bits")
     
     # Step 2: Whitening
-    whitened_payload = whitening(payload, SF, CR)
+    whitened_payload = whitening(payload)
     whitened_bits = bytes_to_bits(whitened_payload)
     if verbose:
         print(f"Después de whitening: {len(whitened_bits)} bits")
@@ -53,6 +53,7 @@ def lora_encode(payload, SF=7, CR=4/7, LDRO=False, verbose=False):
     # Step 4: Padding
     cr_map = {4/5: 5, 4/6: 6, 4/7: 7, 4/8: 8}
     symbols_per_block = cr_map[CR]
+    #symbols_per_block = SF
     bits_per_symbol = SF - 2 if LDRO else SF
     bits_per_block = symbols_per_block * bits_per_symbol
     

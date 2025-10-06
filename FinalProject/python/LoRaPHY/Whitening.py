@@ -2,33 +2,28 @@ import numpy as np
 
 def lfsr_whitening_sequence(length):
     """
-    Generate LoRa whitening sequence using LFSR.
-    Polynomial: x^8 + x^6 + x^5 + x^4 + 1
+    Genera secuencia de whitening para LoRa usando LFSR.
+    Polinomio: x^8 + x^6 + x^5 + x^4 + 1
     
-    Parameters
+    Parámetros
     ----------
     length : int
-        Number of bytes needed
+        Número de bytes necesarios
         
-    Returns
+    Retorna
     -------
     np.ndarray
-        Whitening sequence (bytes)
+        Secuencia de whitening (bytes)
     """
-    # LFSR with polynomial x^8 + x^6 + x^5 + x^4 + 1
-    # Taps at positions: 8, 6, 5, 4 (counting from 1)
-    # In 0-indexed: positions 7, 5, 4, 3
-    
-    # Initial state (arbitrary non-zero, typically 0xFF)
+
     state = 0xFF
     sequence = []
     
     for _ in range(length):
-        # Current state forms the whitening byte
         sequence.append(state)
         
-        # Calculate feedback bit
-        # XOR of bits at positions 7, 5, 4, 3 (0-indexed)
+        # Calcular bit de feedback
+        # XOR de bits en posiciones 7, 5, 4, 3 (índice 0)
         bit7 = (state >> 7) & 1
         bit5 = (state >> 5) & 1
         bit4 = (state >> 4) & 1
@@ -36,43 +31,36 @@ def lfsr_whitening_sequence(length):
         
         feedback = bit7 ^ bit5 ^ bit4 ^ bit3
         
-        # Shift left and insert feedback at LSB
+        # Desplazar a la izquierda e insertar feedback en el LSB
         state = ((state << 1) | feedback) & 0xFF
     
     return np.array(sequence, dtype=np.uint8)
 
 
-def whitening(data_bytes, SF, CR=4/7):
+def whitening(data_bytes):
     """
-    LoRa whitening operation.
+    Operación de whitening para LoRa.
     
-    According to paper: whitening happens BEFORE interleaving and Hamming encoding.
-    The order is: Whitening → Hamming → Interleaving → Gray
-    
-    Parameters
+    Parámetros
     ----------
     data_bytes : array-like
-        Input data bytes (header + payload + CRC if enabled)
-    SF : int
-        Spreading Factor (affects packet structure)
-    CR : float
-        Coding rate (4/5, 4/6, 4/7, 4/8)
+        Bytes de datos de entrada (header + payload + CRC si está habilitado)
         
-    Returns
+    Retorna
     -------
     np.ndarray
-        Whitened bytes
+        Bytes con whitening aplicado
     """
     data_bytes = np.array(data_bytes, dtype=np.uint8)
     
-    # Generate whitening sequence
-    # Note: header is NOT whitened according to paper (Section 4.6)
-    # Only payload is whitened
+    # Generar secuencia de whitening
+    # Nota: el header NO tiene whitening según el paper (Sección 4.6)
+    # Solo el payload tiene whitening
     
-    # The whitening sequence in LoRa is fixed (255 bytes max)
+    # La secuencia de whitening en LoRa es fija (máximo 255 bytes)
     whitening_seq = lfsr_whitening_sequence(255)
     
-    # XOR data with whitening sequence
+    # Operación XOR entre datos y secuencia de whitening
     n_bytes = len(data_bytes)
     whitened = data_bytes ^ whitening_seq[:n_bytes]
     
