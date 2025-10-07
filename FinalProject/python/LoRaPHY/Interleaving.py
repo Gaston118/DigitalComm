@@ -17,7 +17,6 @@ def interleaver(codewords, rdd):
         Símbolos después del interleaving. Longitud = rdd.
     """
     # 1. Convertir codewords a matriz de bits (right-msb)
-    # Shape: (len(codewords), rdd) -> e.g., (5, 8)
     tmp = np.array([list(np.binary_repr(cw, width=rdd)) for cw in codewords], dtype=int)
     
     # 2. Circular shift diagonal
@@ -25,16 +24,14 @@ def interleaver(codewords, rdd):
     # La salida es una lista de arrays, cada uno de longitud len(codewords)
     shifted_cols = [np.roll(tmp[:,x], 1-(x+1)) for x in range(rdd)]
     
-    # 3. Apilar columnas. Shape: (len(codewords), rdd) -> e.g., (5, 8)
+    # 3. Apilar columnas. 
     interleaved_matrix_cols = np.stack(shifted_cols, axis=1)
     
-    # 4. <--- CORRECCIÓN CRÍTICA: Transponer la matriz.
+    # 4. Transponer la matriz.
     # Esto asegura que tengamos 'rdd' filas (símbolos) de longitud 'len(codewords)' (bits por símbolo).
-    # Shape: (rdd, len(codewords)) -> e.g., (8, 5)
     interleaved_matrix = interleaved_matrix_cols.T
     
     # 5. Convertir fila de bits a int
     symbols_i = np.array([int("".join(map(str,row)),2) for row in interleaved_matrix], dtype=np.uint16)
     
-    # La longitud de symbols_i ahora será 'rdd' (8)
     return symbols_i

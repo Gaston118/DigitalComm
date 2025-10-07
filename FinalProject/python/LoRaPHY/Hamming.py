@@ -32,7 +32,7 @@ def hamming_encode(nibbles, sf=7, cr=4/8):
     np.ndarray
         Encoded codewords (uint8)
     """
-    # Map fractional CR to integer code (1–4)
+
     cr_map = {4/5: 1, 4/6: 2, 4/7: 3, 4/8: 4}
     if cr not in cr_map:
         raise ValueError("CR must be one of 4/5, 4/6, 4/7, or 4/8")

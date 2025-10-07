@@ -33,11 +33,11 @@ def gen_header(plen, cr, crc, header_checksum_matrix=HEADER_CHECKSUM_MATRIX):
     header_nibbles = np.zeros(5, dtype=np.uint8)
 
     # --- Primeros 3 nibbles ---
-    header_nibbles[0] = (plen >> 4) & 0x0F  # nibble alto de plen
-    header_nibbles[1] = plen & 0x0F         # nibble bajo de plen
+    header_nibbles[0] = (plen >> 4) & 0x0F  
+    header_nibbles[1] = plen & 0x0F         
     header_nibbles[2] = (2 * cr) | (crc & 0x01)
 
-    # Convertir cada nibble a 4 bits (MSB primero) - equivalente a de2bi(..., 4, 'left-msb')
+    # Convertir cada nibble a 4 bits (MSB primero)
     bits_12 = np.zeros(12, dtype=np.uint8)
     for i in range(3):
         nibble_bits = np.array([
@@ -48,7 +48,6 @@ def gen_header(plen, cr, crc, header_checksum_matrix=HEADER_CHECKSUM_MATRIX):
         ], dtype=np.uint8)
         bits_12[i*4:(i+1)*4] = nibble_bits
 
-    # Multiplicación en GF(2): matriz @ vector
     checksum_bits = np.mod(header_checksum_matrix @ bits_12, 2).astype(np.uint8)
 
     # --- Nibble 4: solo el primer bit del checksum ---
