@@ -22,4 +22,5 @@ __all__ = [ 'hamming_encode',
             'gray_encode', 
             'lora_encode',
             'generate_crc',
-            'gen_header']
+            'gen_header', 
+            'lora_modulate']

@@ -65,7 +65,7 @@ def lora_encode(payload, SF=7, CR=4/7, LDRO=False, IH=True, CRC=False, verbose=F
         if verbose:
             print(f"CRC calculado: {crc_bytes}")
             print(f"Payload con CRC: {payload}")
-            
+
     plen = len(payload)
     # -------------------------------
     # Whitening (solo payload)
@@ -144,7 +144,152 @@ def lora_encode(payload, SF=7, CR=4/7, LDRO=False, IH=True, CRC=False, verbose=F
         print("Símbolos después del Gray encoding:", symbols_g)
 
     if len(symbols_g) != sym_num:
-        print("WARNING: La cantidad de símbolos no coincide con la esperada.")
-        print(f"Cantidad esperada: {sym_num}, Cantidad obtenida: {len(symbols_g)}")
+        print("\033[91mERROR: La cantidad de símbolos no coincide con la esperada.\033[0m")
+        print(f"\033[91mCantidad esperada: {sym_num}, Cantidad obtenida: {len(symbols_g)}\033[0m")
+    else:
+        print(f"\033[92mCantidad de símbolos coincide con la esperada. {len(symbols_g)}\033[0m")
+
 
     return symbols_g
+
+def waveform_former(symbol, M, B, T):
+    k = np.arange(M)
+    phase = ((symbol + k) % M) * (k * T * B) / M
+    chirp_waveform = np.exp(1j * 2 * np.pi * phase) / np.sqrt(M)
+    return chirp_waveform
+
+def lora_generate_preamble_netid_sfd(M, B, T, preamble_len=8, netid_symbols=(24, 32)):
+    # Up-chirp base (símbolo 0)
+    up_chirp_0 = waveform_former(0, M, B, T)
+    
+    # Down-chirp base
+    #down_chirp_0 = waveform_former(0, M, B, T)[::-1]  # invertir tiempo para down-chirp
+    k = np.arange(M)
+    down_chirp = np.exp(-1j * 2 * np.pi * (0 + k) * (k * T * B) / M)
+
+    # Preambulo: preamble_len repeticiones de up-chirp base
+    preamble = np.tile(up_chirp_0, preamble_len)
+    
+    # NetID: dos up-chirps con símbolos del ID de red
+    netid = np.concatenate([waveform_former(s, M, B, T) for s in netid_symbols])
+    
+    # SFD: 2 down-chirps + 1/4 de down-chirp (0.25*M samples)
+    chirp_len = len(up_chirp_0)
+    sfd = np.concatenate([
+        down_chirp,
+        down_chirp,
+        down_chirp[:chirp_len//4]
+    ])
+    
+    return preamble, netid, sfd
+
+def lora_modulate(symbols, M, B, T):
+    """
+    Modulate LoRa symbols into a complex baseband signal.
+
+    Parameters:
+    -----------
+    symbols : array-like
+        Array of LoRa symbols (integers from 0 to M-1)
+    M : int
+        Number of symbols (M = 2^SF)
+    B : float
+        Bandwidth in Hz
+    T : float
+        Symbol duration in seconds
+
+    """
+    preamble, netid, sfd = lora_generate_preamble_netid_sfd(M, B, T)
+    data = np.concatenate([waveform_former(s, M, B, T) for s in symbols])
+    tx_signal = np.concatenate([preamble, netid, sfd, data])
+
+    return tx_signal
+
+# ===============================================================================
+# OTRA FORMA DE HACER EL CHIRP - PARECE LA CORRECTA 
+# ===============================================================================
+def waveform_former_lora(symbol, M, B, T, is_up=True, cfo=0.0, tdelta=0.0, tscale=1.0, fs=None):
+    """
+    Genera un chirp de LoRa para un símbolo, implementado similar al MATLAB LoRaPHY.chirp.
+
+    Parámetros
+    ----------
+    symbol : int o float
+        Índice del símbolo (h). Puede ser no entero; se redondeará internamente (comportamiento MATLAB).
+    M : int
+        Número de bins de frecuencia (N = 2^SF).
+    B : float
+        Ancho de banda (Hz).
+    T : float
+        Duración del símbolo (segundos). Normalmente T ~ N / B en LoRa.
+    is_up : bool, opcional
+        True para up-chirp, False para down-chirp. Por defecto True.
+    cfo : float, opcional
+        Offset de frecuencia portadora (Hz). Por defecto 0.
+    tdelta : float, opcional
+        Desplazamiento de tiempo (segundos). Por defecto 0.
+    tscale : float, opcional
+        Factor de escalado de tiempo. Por defecto 1.
+    fs : float o None, opcional
+        Frecuencia de muestreo (Hz). Si es None, fs = M / T (así samp_per_sym == M).
+
+    Retorna
+    -------
+    y : np.ndarray (complejo)
+        Muestras en banda base complejas para el símbolo chirp (vector 1-D).
+    """
+
+    # Número de bins de frecuencia
+    N = int(M)
+    if fs is None:
+        # Elegir fs para que samp_per_sym == M cuando T sea la duración del símbolo
+        fs = float(M) / float(T)
+
+    # Número de muestras por símbolo (MATLAB: samp_per_sym = round(fs/bw*N))
+    samp_per_sym = int(round(fs / B * N))
+
+    # Manejar valor fraccionario del símbolo exactamente como MATLAB
+    h_orig = float(symbol)
+    h = int(round(h_orig))
+    # Ajustar cfo debido al redondeo como hace MATLAB
+    cfo = cfo + (h_orig - h) / N * B
+
+    # Pendiente del chirp y frecuencia inicial
+    if is_up:
+        k = B / T
+        f0 = -B / 2.0 + cfo
+    else:
+        k = -B / T
+        f0 = B / 2.0 + cfo
+
+    # Primer segmento: longitud proporcional a (N-h)
+    K1 = int(round(samp_per_sym * (N - h) / N))
+    t1 = (np.arange(0, K1 + 1) / fs) * tscale + tdelta  # longitud K1+1
+    # Fase para el primer segmento
+    if t1.size > 0:
+        c1 = np.exp(1j * 2.0 * np.pi * (t1 * (f0 + k * T * h / N + 0.5 * k * t1)))
+    else:
+        c1 = np.array([], dtype=np.complex128)
+
+    # Continuidad de fase: calcular phi como hace MATLAB
+    if c1.size == 0:
+        phi = 0.0
+    else:
+        phi = np.angle(c1[-1])
+
+    # Segundo segmento: longitud proporcional a h
+    K2 = int(round(samp_per_sym * h / N))
+    if K2 > 0:
+        t2 = (np.arange(0, K2) / fs) + tdelta
+        c2 = np.exp(1j * (phi + 2.0 * np.pi * (t2 * (f0 + 0.5 * k * t2))))
+    else:
+        c2 = np.array([], dtype=np.complex128)
+
+    # Concatenar segmentos: c1 (sin la última muestra) + c2
+    if c1.size > 0:
+        y = np.concatenate([c1[:-1], c2])  # MATLAB usaba 1:snum-1
+    else:
+        y = c2.copy()
+
+    return y
+# ===============================================================================
