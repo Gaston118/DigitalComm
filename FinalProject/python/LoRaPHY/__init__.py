@@ -13,6 +13,7 @@ from .Interleaving import *
 from .Whitening import *
 from .Gray import *
 from .Header import *
+from .CRC import *
 from .Transmitter import *
 
 __all__ = [ 'hamming_encode', 
@@ -20,4 +21,5 @@ __all__ = [ 'hamming_encode',
             'whitening_seq', 
             'gray_encode', 
             'lora_encode',
+            'generate_crc',
             'gen_header']

@@ -1,6 +1,5 @@
 import numpy as np
-from LoRaPHY import hamming_encode, interleaver, whitening_seq, gray_encode, gen_header
-
+from LoRaPHY import (hamming_encode, interleaver, whitening_seq, gray_encode, gen_header, generate_crc)
 import numpy as np
 
 def calc_sym_num(plen, SF, CR=1, crc=False, has_header=True, ldr=False):
@@ -43,20 +42,31 @@ def calc_sym_num(plen, SF, CR=1, crc=False, has_header=True, ldr=False):
 
 def lora_encode(payload, SF=7, CR=4/7, LDRO=False, IH=True, CRC=False, verbose=False):
     payload = np.array(payload, dtype=np.uint8)
-    plen = len(payload)
+    plen1 = len(payload)
 
     # -------------------------------
     # Número de símbolos esperados
     # -------------------------------
     sym_map_CR = {4/5:1, 4/6:2, 4/7:3, 4/8:4}
     CR_int = sym_map_CR[CR]
-    sym_num = calc_sym_num(plen, SF, CR_int, CRC, not IH, LDRO)
+    sym_num = calc_sym_num(plen1, SF, CR_int, CRC, not IH, LDRO)
 
     if verbose:
         print("=====================================================")
         print(f"Número de símbolos esperados: {sym_num}")
         print("=====================================================")
 
+    # -------------------------------
+    # Generar CRC
+    # -------------------------------
+    if CRC:
+        crc_bytes = generate_crc(payload)
+        payload = np.concatenate([payload, crc_bytes])
+        if verbose:
+            print(f"CRC calculado: {crc_bytes}")
+            print(f"Payload con CRC: {payload}")
+            
+    plen = len(payload)
     # -------------------------------
     # Whitening (solo payload)
     # -------------------------------

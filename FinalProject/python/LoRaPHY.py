@@ -7,7 +7,7 @@ SF = 10
 CR = 4/8
 DE = 1
 IH = 0
-CRC = 0
+CRC = 1
 
 symbols = lora_encode(payload, SF=SF, CR=CR, LDRO=DE, IH=IH, CRC=CRC, verbose=True)
 print("Cantidad de símbolos generados:", len(symbols))
