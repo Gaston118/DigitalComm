@@ -12,6 +12,12 @@ from .Hamming import *
 from .Interleaving import *
 from .Whitening import *
 from .Gray import *
+from .Header import *
 from .Transmitter import *
 
-__all__ = ['hamming_encode', 'interleaver', 'whitening_seq', 'gray_encode', 'lora_encode']
+__all__ = [ 'hamming_encode', 
+            'interleaver', 
+            'whitening_seq', 
+            'gray_encode', 
+            'lora_encode',
+            'gen_header']

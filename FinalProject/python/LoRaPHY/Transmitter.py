@@ -1,5 +1,5 @@
 import numpy as np
-from LoRaPHY import hamming_encode, interleaver, whitening_seq, gray_encode
+from LoRaPHY import hamming_encode, interleaver, whitening_seq, gray_encode, gen_header
 
 import numpy as np
 
@@ -58,12 +58,10 @@ def lora_encode(payload, SF=7, CR=4/7, LDRO=False, IH=True, CRC=False, verbose=F
         print("=====================================================")
 
     # -------------------------------
-    # Whitening
+    # Whitening (solo payload)
     # -------------------------------
     seq = whitening_seq(255)
     data_w = np.bitwise_xor(payload, seq[:plen])
-    if verbose:
-        print("Payload blanqueado:", data_w)
 
     # -------------------------------
     # Pasar a Nibbles
@@ -71,11 +69,17 @@ def lora_encode(payload, SF=7, CR=4/7, LDRO=False, IH=True, CRC=False, verbose=F
     CR_map_2 = {4/5: 1, 4/6: 2, 4/7: 3, 4/8: 4}
     CR_int_2 = CR_map_2[CR]
     nibble_num = int((SF - 2) + (sym_num -8)/(CR_int_2 + 4)*(SF - 2*LDRO))
-    pad_bytes = int(np.ceil((nibble_num - 2*len(data_w))/2))
+
+    if not IH:  
+        data_nibble_count = nibble_num - (SF - 2)
+    else:  # Implicit header
+        data_nibble_count = nibble_num
+
+    pad_bytes = max(0, int(np.ceil((data_nibble_count - 2*len(data_w))/2)))
     data_w = np.concatenate([data_w, 0xFF*np.ones(pad_bytes, dtype=np.uint8)])
 
-    data_n = np.zeros(int(nibble_num), dtype=np.uint8)
-    for i in range(int(nibble_num)):
+    data_n = np.zeros(int(data_nibble_count), dtype=np.uint8)
+    for i in range(int(data_nibble_count)):
         idx = i // 2  # Python index empieza en 0
         if i % 2 == 0:
             data_n[i] = data_w[idx] & 0x0F  # LSB
@@ -84,6 +88,17 @@ def lora_encode(payload, SF=7, CR=4/7, LDRO=False, IH=True, CRC=False, verbose=F
 
     if verbose:
         print("Payload en nibbles:", data_n)
+
+    # -------------------------------
+    # Generar Header (si es explícito)
+    # -------------------------------
+    if not IH:  # Si hay header explícito
+        header_nibbles = gen_header(plen, CR_int, int(CRC))
+        # Concatenar header al principio de data_n
+        data_n = np.concatenate([header_nibbles, data_n])
+        if verbose:
+            print("Header generado (nibbles):", header_nibbles)
+            print("Payload completo con header:", data_n)
 
     # -------------------------------
     # Hamming
