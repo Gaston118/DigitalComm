@@ -10,7 +10,7 @@ SF = 7                                              # Spreading Factor
 M = 2**SF                                           # Número de bits por símbolo
 B = 125e3                                           # Ancho de banda
 T = 1/B                                             # Periodo de muestra
-num_symbols = 250000                                # Número de símbolos a transmitir
+num_symbols = 200000                                # Número de símbolos a transmitir
 num_bits = num_symbols * SF                         # Número de bits a transmitir
 bits_tx = np.random.randint(0, 2, size=num_bits)    # Bits a transmitir
 
@@ -74,84 +74,81 @@ tx_signal = lora_modulate(symbols_tx, M, B, T)
 #------------------------------------------------------------------------------------------
 #                               FUNCIÓN DE DECHIRP
 #------------------------------------------------------------------------------------------
-def dechirp(signal, index, sample_num, bin_num, zero_padding, upchirp_ref):
-    # Extraer el símbolo actual
-    segment = signal[index:index + sample_num]
-    if len(segment) < sample_num:
+def dechirp(signal, start_idx, Ns, M, zp_factor, upchirp):
+    """
+    Decodifica UN símbolo LoRa realizando dechirp + FFT.
+
+    Parameters:
+        signal     : señal recibida (time-domain)
+        start_idx  : índice donde empieza el símbolo
+        Ns         : cantidad de samples por símbolo
+        M          : número de bins (=2^SF)
+        zp_factor  : factor de zero-padding para FFT
+        upchirp    : referencia de chirp base (ya precalculado)
+
+    Returns:
+        spectrum_abs : magnitud del espectro (opcional)
+        peak_bin     : índice del bin con mayor energía
+    """
+
+    # 1. extraer símbolo
+    segment = signal[start_idx : start_idx + Ns]
+    if len(segment) < Ns:
         return None, None
 
-    # Dechirp
-    dechirped = segment * np.conj(upchirp_ref)
+    # 2. dechirp: multiplicar contra chirp conjugado
+    dechirped = segment * np.conj(upchirp)
 
-    # FFT (con zero padding)
-    fft_size = int(bin_num * zero_padding)
-    spectrum = np.fft.fft(dechirped, n=fft_size)
+    # 3. FFT + zero padding
+    Nfft = int(M * zp_factor)
+    spectrum = np.fft.fft(dechirped, n=Nfft)
 
-    # Tomar la suma de las dos mitades
-    half = int(min(bin_num, fft_size//2))
-    ft_abs = np.abs(spectrum[:half]) + np.abs(spectrum[-half:])
-    idx_peak = int(np.argmax(ft_abs))
-    return ft_abs, idx_peak
+    # 4. quedarnos con la mitad (banda útil) y buscar pico
+    spectrum_mag = np.abs(spectrum[:M])
+    peak_bin = int(np.argmax(spectrum_mag))
+
+    return spectrum_mag, peak_bin
 
 #------------------------------------------------------------------------------------------
 #                               DETECCION DE LA TRAMA LORA 
 #------------------------------------------------------------------------------------------
-def detect( signal, 
-            start_index, 
-            sample_num, 
-            preamble_len, 
-            bin_num, 
-            zero_padding, 
-            upchirp_ref, 
-            mag_threshold=None):
-
-
-    ii = int(start_index)
-    pk_bin_list = [] # Almacena los índices de bin (posición del pico en la FFT) 
-                     # Detectados en chirps sucesivos; usamos esta lista para verificar 
-                     # que vemos chirps coherentes y consecutivos (el preámbulo está formado por chirps repetidos).
-    sig_len = len(signal) # longitud total de la señal para evitar sobrescribir índices.
-
-    while ii < sig_len - sample_num * preamble_len:
-        # Se considera detectado el preámbulo cuando hemos observado preamble_len-1 chirps coherentes consecutivos.
-        if len(pk_bin_list) == preamble_len - 1:
-            # Alinear el pico del último chirp al inicio
-            x = ii - int(round((pk_bin_list[-1]) / zero_padding * 2)) # redondea a la muestra entera más cercana.
-            return max(0, x)  # asegurar índice no negativo
+def detect(signal, start_idx, Ns, preamble_len, M, zp, upchirp_ref, mag_threshold=None):
+    ii = start_idx
+    pk_bins = []
+    sig_len = len(signal)
+    
+    while ii < sig_len - Ns * preamble_len:
         
-        # Ajusta la posición ii hacia atrás para alinear finamente el pico detectado con el principio del preámbulo.
-        # pk_bin_list[-1] es el bin del pico del último chirp detectado.
-        # Se divide por zero_padding y se multiplica por 2 porque la relación entre bin FFT y desplazamiento en muestras depende del muestreo y del padding.
-        
-        mag, pk_bin = dechirp(signal, ii, sample_num, bin_num, zero_padding, upchirp_ref)
+        # condición de detección
+        if len(pk_bins) == preamble_len - 1:
+            offset = int(round(pk_bins[-1] / zp * 2))
+            return max(0, ii - offset)
+
+        # dechirp + fft
+        mag, pk_bin = dechirp(signal, ii, Ns, M, zp, upchirp_ref)
         if mag is None:
             return -1
-
-        # Filtrar por magnitud
+        
+        # umbral opcional
         if mag_threshold is not None and mag[pk_bin] < mag_threshold:
-            # Reiniciar y avanzar
-            pk_bin_list = []
-            ii += sample_num
+            pk_bins = []
+            ii += Ns
             continue
+        
+        # coherencia con el bin anterior
+        if pk_bins:
+            bin_diff = (pk_bins[-1] - pk_bin) % M
+            if bin_diff > M/2:
+                bin_diff = M - bin_diff
 
-            # Si ya había un bin previo (pk_bin_list[-1]), calculamos la distancia circular entre el bin anterior y el actual: usamos modulo bin_num porque el índice de bins es circular (frecuencia envuelta).
-            # luego si la diferencia supera bin_num/2 usamos la distancia complementaria (la menor de las dos direcciones en el anillo).
-            # Esto nos da la distancia mínima entre índices de pico en términos de bins.
-
-        if pk_bin_list:
-            bin_diff = (pk_bin_list[-1] - pk_bin) % bin_num
-            if bin_diff > bin_num / 2:
-                bin_diff = bin_num - bin_diff
-
-            # Si el bin es coherente, agregarlo
-            if bin_diff <= zero_padding:
-                pk_bin_list.append(pk_bin)
+            if bin_diff <= zp:
+                pk_bins.append(pk_bin)
             else:
-                pk_bin_list = [pk_bin]
+                pk_bins = [pk_bin]
         else:
-            pk_bin_list = [pk_bin]
+            pk_bins = [pk_bin]
 
-        ii += sample_num
+        ii += Ns
 
     return -1
 
@@ -232,7 +229,7 @@ print(f"BER ideal: {BER}")
 #                          SIMULACIÓN DE CANAL CON RUIDO
 # ===========================================================================================
 
-snr_dB_range = np.arange(-11, 1, -2)                    # Es/N0 (dB)
+snr_dB_range = np.arange(-10, -1, 1)                    # Es/N0 (dB)
 EsN0_dB_range = snr_dB_range + 10*np.log10(M)           # Para simular se suma, ya que SNR dB = Es/N0 - 10log10(M)
 Es = 1                                                  # Energía por símbolo (normalizada)
 BER_awgn = np.zeros_like(snr_dB_range, dtype=float)
