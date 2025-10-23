@@ -155,7 +155,9 @@ def detect(signal, start_idx, Ns, preamble_len, M, zp, upchirp_ref, mag_threshol
 # Chirp de referencia para dechirp
 up_ref = waveform_former(0, M, B, T)
 
-x = detect(tx_signal, 0, M, 8, M, 1, up_ref, mag_threshold=None)
+zero_padding = 4  # Tolerancia en bins para detección coherente
+
+x = detect(tx_signal, 0, M, 8, M, zero_padding, up_ref, mag_threshold=None)
 
 if x != -1:
     preamble_start = x - (8 - 1) * M
@@ -261,7 +263,7 @@ for idx, snr_dB in enumerate(EsN0_dB_range):
     # Señal recibida con AWGN
     rx_signal = tx_signal + noise
 
-    x2 = detect(rx_signal, 0, M, 8, M, 1, up_ref, mag_threshold=None)
+    x2 = detect(rx_signal, 0, M, 8, M, zero_padding, up_ref, mag_threshold=None)
 
     print("-------> Detección en canal AWGN plano <-------")
 
@@ -324,7 +326,7 @@ for idx, snr_dB in enumerate(EsN0_dB_range):
     noise_sel     = sigma * (np.random.randn(len(tx_faded)) + 1j*np.random.randn(len(tx_faded)))
     rx_signal_sel = tx_faded + noise_sel
 
-    x3 = detect(rx_signal_sel, 0, M, 8, M, 1, up_ref, mag_threshold=None)
+    x3 = detect(rx_signal_sel, 0, M, 8, M, zero_padding, up_ref, mag_threshold=None)
 
     print("-------> Detección en canal selectivo en frecuencia <-------")
 
