@@ -3,10 +3,6 @@
 LoRaPHY — Complete LoRa Physical Layer (Python version)
 """
 
-# --- External dependencies ---
-import numpy as np
-import scipy.fft as fft
-
 # --- Internal dependencies ---
 from .Hamming import *
 from .Interleaving import *

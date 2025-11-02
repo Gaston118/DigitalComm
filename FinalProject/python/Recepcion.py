@@ -90,11 +90,6 @@ def detect(signal, start_idx, Ns, preamble_len, M, zp, up_ref, mag_threshold=Non
 #                           ESTIMACIÓN DE CFO A PARTIR DE LA FASE
 #===========================================================================================
 def estimate_cfo_phase(symbol_seg, up_ref, fs_eff):
-    """
-    Estima CFO continuo (Hz) a partir de la fase media tras dechirp:
-    d[n] = symbol * conj(up_ref); r = sum(conj(d[n]) * d[n+1])
-    phi = arg(r) ≈ 2π Δf / fs_eff  ->  Δf = phi * fs_eff / (2π)
-    """
     d = symbol_seg * np.conj(up_ref)
     if len(d) < 2:
         return 0.0

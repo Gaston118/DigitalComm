@@ -1,6 +1,5 @@
 import numpy as np
 
-
 #############################################################################################
 #                                                                                           #
 #  ████████ ██████   █████  ███    ██ ███████ ███    ███ ██ ███████ ██  ██████  ███    ██   #
@@ -57,13 +56,6 @@ def preamble_netid_sfd(M, B, T, preamble_len=8, netid_symbols=(24, 32)):
 #===========================================================================================
 
 def inject_cfo(x: np.ndarray, cfo_hz: float, fs_eff: float, start_idx: int = 0) -> np.ndarray:
-    """
-    Aplica una rotación compleja e^{j 2π f_cfo n / fs_eff} a la señal x para simular CFO.
-    - x: señal compleja (baseband)
-    - cfo_hz: CFO en Hz (puede ser positivo o negativo)
-    - fs_eff: frecuencia de muestreo efectiva (en tu caso, fs_eff = B si Ns=M)
-    - start_idx: índice a partir del cual aplicar la rotación (0 para toda la señal)
-    """
     if cfo_hz == 0.0:
         return x
     y = np.array(x, copy=True)
@@ -71,16 +63,3 @@ def inject_cfo(x: np.ndarray, cfo_hz: float, fs_eff: float, start_idx: int = 0) 
     rot = np.exp(1j * 2 * np.pi * cfo_hz * n / float(fs_eff))
     y[start_idx:] *= rot
     return y
-
-def cfo_bins_to_hz(cfo_bins: float, B: float, M: int) -> float:
-    """
-    Convierte un CFO expresado en 'bins LoRa' a Hz.
-    1 bin ≈ B / M Hz.
-    """
-    return float(cfo_bins) * float(B) / float(M)
-
-def cfo_hz_to_bins(cfo_hz: float, B: float, M: int) -> float:
-    """
-    Convierte un CFO en Hz a 'bins LoRa'.
-    """
-    return float(cfo_hz) * float(M) / float(B)

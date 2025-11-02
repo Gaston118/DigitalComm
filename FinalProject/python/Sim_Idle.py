@@ -47,16 +47,12 @@ tx_signal = tx.inject_cfo(tx_signal_sin_cfo, cfo_hz_frame, fs_eff=B)
 # ===========================================================================================
 
 #print("\nGenerando gráficas de la trama LoRa...")
-
 # 1. Gráfica completa de la trama
 #esp.plot_lora_frame(tx_signal, M, SF, B)
-
 # 2. Zoom en preámbulo
 #esp.plot_spectrogram(tx_signal, B, SF, M, section='preamble')
-
 # 3. Zoom en SFD
 #esp.plot_spectrogram(tx_signal, B, SF, M, section='sfd')
-
 # 4. Zoom en datos
 #esp.plot_spectrogram(tx_signal, B, SF, M, section='data')
 
@@ -70,10 +66,9 @@ tx_signal = tx.inject_cfo(tx_signal_sin_cfo, cfo_hz_frame, fs_eff=B)
 #                                                                         #
 ###########################################################################
 
-up_ref = tx.waveform_former(0, M, B, T)
-down_ref = rx.make_down_ref(M, B, T)
-
-zero_padding = 1  # Tolerancia en bins para detección coherente
+up_ref          = tx.waveform_former(0, M, B, T)
+down_ref        = rx.make_down_ref(M, B, T)
+zero_padding    = 1
 
 x = rx.detect(tx_signal, 0, M, 8, M, zero_padding, up_ref, mag_threshold=None)
 
@@ -83,7 +78,6 @@ if x != -1:
     sfd_len = 2 * M + (M // 4)  
     data_start = preamble_start + 8 * M + netid_len + sfd_len
 
-    # Asegurar que hay suficientes muestras para todos los símbolos
     num_data_symbols = num_symbols 
 
     print(f"Preambulo detectado = {x}")
@@ -101,7 +95,7 @@ else:
 
 data_start = x_sync
 
-expected_data_start = int(round(12.25 * M))  # 8 up + 2 netid + 2.25 sfd
+expected_data_start = int(round(12.25 * M)) 
 print(f"Check data start: esperado≈{expected_data_start}, x_sync={x_sync}, delta={x_sync-expected_data_start}")
 print(f"CFO inj={cfo_hz_frame * M / B:.2f} bins, est={ (preamble_bin if preamble_bin<=M//2 else preamble_bin-M):.2f} bins")
 
