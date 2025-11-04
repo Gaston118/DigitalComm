@@ -10,8 +10,20 @@ T = 1/B                                             # Periodo de muestra
 num_symbols = 2000                                  # Número de símbolos a transmitir
 num_bits = num_symbols * SF                         # Número de bits a transmitir
 bits_tx = np.random.randint(0, 2, size=num_bits)    # Bits a transmitir
-zero_padding = 4                                    # Factor de zero padding en la FFT
+zero_padding = 10                                    # Factor de zero padding en la FFT
 num_data_symbols = num_bits // SF                   # Número de símbolos de datos
+
+def lora_modulate(symbols_tx, M, B, T):
+    preamble, netid, sfd = tx.preamble_netid_sfd(M, B, T)
+    data_waveform = np.concatenate([tx.waveform_former(i, M, B, T) for i in symbols_tx])
+    return np.concatenate([preamble, netid, sfd, data_waveform])
+
+def compute_sigma_from_signal(tx_signal, snr_dB):
+    """Calcula sigma de ruido complejo a partir de potencia real de tx_signal y SNR (dB)."""
+    signal_power = np.mean(np.abs(tx_signal)**2)
+    SNR_linear = 10**(snr_dB / 10.0)
+    sigma = np.sqrt(signal_power / (2.0 * SNR_linear))
+    return sigma
 
 # ===========================================================================================
 #                          SIMULACIÓN DE CANAL CON RUIDO
@@ -29,7 +41,8 @@ SER_freqsel  = np.zeros_like(snr_dB_range, dtype=float)
 
 Eb = Es / SF                                            # Energía por bit
 
-up_ref = tx.waveform_former(0, M, B, T)
+up_ref              = tx.waveform_former(0, M, B, T)
+down_ref            = rx.make_down_ref(M, B, T)
 
 N_FRAMES = 10                   # cantidad de tramas por cada SNR
 idle_base = 3 * M               # longitud del "idle" o ruido previo
@@ -49,71 +62,56 @@ for idx, snr_dB in enumerate(EsN0_dB_range):
         # -----------------------------------------------------------------------------------
         #                          CANAL AWGN PLANO
         # -----------------------------------------------------------------------------------
+        cfo_bins_frame = np.random.uniform(-1.0, 1.0)
+        cfo_hz_frame = cfo_bins_frame * B / M
 
         # --- 1. Generar trama aleatoria
         bits_tx = np.random.randint(0, 2, size=num_bits)
         symbols_tx = tx.encode_bits_to_symbols(bits_tx, SF)
-        tx_frame = tx.lora_modulate(symbols_tx, M, B, T)
+        tx_frame = lora_modulate(symbols_tx, M, B, T)
 
-        jitter = np.random.randint(0, jitter_max_samples + 1)  
+        jitter = np.random.randint(0, jitter_max_samples + 1)
         idle_len_frame = idle_base + jitter
-        
-        # --- 2. Generar ruido previo
         noise_idle = (np.random.randn(idle_len_frame) + 1j*np.random.randn(idle_len_frame)) / np.sqrt(2)
         noise_idle *= np.sqrt(np.mean(np.abs(tx_frame)**2))
+        noise_idle *= 0.1
 
-         # --- 3. Concatenar idle + trama
-        tx_signal = np.concatenate([noise_idle, tx_frame])
+         # --- 3. Concatenar idle + trama + CFO
+        tx_signal_sin_cfo = np.concatenate([noise_idle, tx_frame])
+        tx_signal = tx.inject_cfo(tx_signal_sin_cfo, cfo_hz_frame, fs_eff=B)
 
         # --- 4. Aplicar canal y ruido AWGN
-        SNR   = 10**(snr_dB / 10)                   # relación lineal Potencia_señal / Potencia_ruido
-        N0    = Es / SNR                            # densidad espectral de ruido
-        sigma = np.sqrt(N0/2)                       # desviación típica por dimensión / estandar
-
+        sigma = compute_sigma_from_signal(tx_signal, snr_dB)
         noise = sigma * (np.random.randn(len(tx_signal)) + 1j*np.random.randn(len(tx_signal)))
-
-        # Señal recibida con AWGN
         rx_signal = tx_signal + noise
 
         # --- 5. Detección de preámbulo
-        x_detect = rx.detect(rx_signal, 0, M, 8, M, zero_padding, up_ref, mag_threshold=None)
-
-        if x_detect == -1:
-            # si no detecta, contar como error total
-            BER_tmp[frame_idx] = 1.0
-            SER_tmp[frame_idx] = 1.0
-            print("❌ No se detectó preámbulo AWGN")
+        x = rx.detect(rx_signal, 0, M, 8, M, zero_padding, up_ref, mag_threshold=None)
+        if x != -1:
+            preamble_start = x - (8 - 1) * M
+            netid_len = 2 * M
+            sfd_len = 2 * M + (M // 4)
+            data_start_nom = preamble_start + 8 * M + netid_len + sfd_len
+            #print(f"Preambulo detectado = {x}")
+            #print(f"Inicio estimado del preámbulo = {preamble_start}")
+            #print(f"Inicio de datos = {data_start_nom}, símbolos de datos a procesar = {num_symbols}")
+        else:
+            print("No se detectó preámbulo - saltando SNR")
             continue
 
-        preamble_start = x_detect - (8 - 1) * M
-        netid_len = 2 * M
-        sfd_len = 2 * M + (M // 4)
-        data_start = preamble_start + 8 * M + netid_len + sfd_len
-        data_signal = rx_signal[data_start : data_start + num_data_symbols * M]
+        # --- 6. Sincronización fina
+        x_sync, preamble_bin, preamble_bin_zp, cfo_hz = rx.sync(rx_signal, x, M, M, zero_padding, up_ref, down_ref, B)
+        if x_sync == -1:
+            print("Error en sincronización - saltando SNR")
+            continue
+        print(f"Sincronización exitosa: x_sync = {x_sync}, preamble_bin = {preamble_bin}, preamble_bin_zp = {preamble_bin_zp}, CFO = {cfo_hz} Hz")
+             
+        symbols_rx, num_avail = rx.demod_data(rx_signal, x_sync, num_symbols, M, zero_padding, up_ref, preamble_bin_zp)
 
-        print(f"Preambulo detectado = {x_detect} Inicio estimado del preámbulo = {preamble_start}")
-
-        # --- 6. Demodulación símbolo a símbolo
-        symbols_rx = []
-        for i in range(num_data_symbols):
-            block = data_signal[i*M : (i+1)*M]
-            if len(block) < M:
-                break
-            symbols_rx.append(rx.nTuple_former(block, M, B, T))
-        symbols_rx = np.array(symbols_rx)
-        bits_rx = rx.decode_symbols_to_bits(symbols_rx, SF)
-
-        # --- 7. Cálculo de errores
-        #num_symbol_errors = np.sum(symbols_tx[:num_data_symbols] != symbols_rx[:num_data_symbols])
-        #num_bit_errors = np.sum(bits_tx[:num_data_symbols*SF] != bits_rx[:num_data_symbols*SF])
-
-        #SER_tmp[frame_idx] = num_symbol_errors / num_data_symbols
-        #BER_tmp[frame_idx] = num_bit_errors / (num_data_symbols * SF)
-
-        # número de símbolos realmente demodulados
-        num_proc_symbols = len(symbols_rx)
-
+        #--- 7. Cálculo de errores
+        num_proc_symbols = num_avail
         if num_proc_symbols == 0:
+            # no se demoduló nada: contar como fallo total
             SER_tmp[frame_idx] = 1.0
             BER_tmp[frame_idx] = 1.0
         else:
@@ -146,68 +144,57 @@ for idx, snr_dB in enumerate(EsN0_dB_range):
         # -----------------------------------------------------------------------------------
         #                          CANAL SELECTIVO EN FRECUENCIA
         # -----------------------------------------------------------------------------------
-        
+
+        cfo_bins_frame = np.random.uniform(-1.0, 1.0)
+        cfo_hz_frame = cfo_bins_frame * B / M
+
         # --- 1. Generar trama aleatoria
         bits_tx = np.random.randint(0, 2, size=num_bits)
         symbols_tx = tx.encode_bits_to_symbols(bits_tx, SF)
-        tx_frame = tx.lora_modulate(symbols_tx, M, B, T)
+        tx_frame = lora_modulate(symbols_tx, M, B, T)
 
         jitter = np.random.randint(0, jitter_max_samples + 1)
-        idle_len = idle_base + jitter
-
-        # --- 2. Generar ruido previo (idle)
-        noise_idle = (np.random.randn(idle_len) + 1j*np.random.randn(idle_len)) / np.sqrt(2)
-        noise_idle *= np.sqrt(np.mean(np.abs(tx_frame)**2))  # igualar potencia promedio
+        idle_len_frame = idle_base + jitter
+        noise_idle = (np.random.randn(idle_len_frame) + 1j*np.random.randn(idle_len_frame)) / np.sqrt(2)
+        noise_idle *= np.sqrt(np.mean(np.abs(tx_frame)**2))
+        noise_idle *= 0.1
 
         # --- 3. Concatenar ruido previo + trama
         tx_signal = np.concatenate([noise_idle, tx_frame])
 
-        # --- 4. Canal selectivo en frecuencia (fading)
-        tx_faded = np.convolve(tx_signal, h_freqsel, mode='same')
+        tx_faded_sin_cfo = np.convolve(tx_signal, h_freqsel, mode='same')
+        tx_faded = tx.inject_cfo(tx_faded_sin_cfo, cfo_hz_frame, fs_eff=B)
 
         # --- 5. Añadir ruido AWGN
-        SNR   = 10**(snr_dB / 10)
-        N0    = Es / SNR
-        sigma = np.sqrt(N0/2)
+        sigma = compute_sigma_from_signal(tx_faded, snr_dB)
         noise_sel = sigma * (np.random.randn(len(tx_faded)) + 1j*np.random.randn(len(tx_faded)))
         rx_signal_sel = tx_faded + noise_sel
 
         # --- 6. Detección de preámbulo
-        x_detect = rx.detect(rx_signal_sel, 0, M, 8, M, zero_padding, up_ref, mag_threshold=None)
-
-        if x_detect == -1:
-            BER_tmp_sel[frame_idx] = 1.0
-            SER_tmp_sel[frame_idx] = 1.0
-            print("❌ No se detectó preámbulo FREQ-SEL")
+        x = rx.detect(rx_signal_sel, 0, M, 8, M, zero_padding, up_ref, mag_threshold=None)
+        if x != -1:
+            preamble_start = x - (8 - 1) * M
+            netid_len = 2 * M
+            sfd_len = 2 * M + (M // 4)
+            data_start_nom = preamble_start + 8 * M + netid_len + sfd_len
+            #print(f"Preambulo detectado = {x}")
+            #print(f"Inicio estimado del preámbulo = {preamble_start}")
+            #print(f"Inicio de datos = {data_start_nom}, símbolos de datos a procesar = {num_symbols}")
+        else:
+            print("No se detectó preámbulo - saltando SNR")
             continue
 
-        preamble_start = x_detect - (8 - 1) * M
-        netid_len = 2 * M
-        sfd_len = 2 * M + (M // 4)
-        data_start = preamble_start + 8 * M + netid_len + sfd_len
-        data_signal = rx_signal_sel[data_start : data_start + num_data_symbols * M]
+        # --- 6. Sincronización fina
+        x_sync, preamble_bin, preamble_bin_zp, cfo_hz = rx.sync(rx_signal_sel, x, M, M, zero_padding, up_ref, down_ref, B)
+        if x_sync == -1:
+            print("Error en sincronización - saltando SNR")
+            continue
+        print(f"Sincronización exitosa: x_sync = {x_sync}, preamble_bin = {preamble_bin}, preamble_bin_zp = {preamble_bin_zp}, CFO = {cfo_hz} Hz")
 
-        print(f"Preambulo detectado = {x_detect} Inicio estimado del preámbulo = {preamble_start}")
+        symbols_rx, num_avail = rx.demod_data(rx_signal_sel, x_sync, num_symbols, M, zero_padding, up_ref, preamble_bin_zp)
 
-        # --- 7. Demodulación símbolo a símbolo
-        symbols_rx = []
-        for i in range(num_data_symbols):
-            block = data_signal[i*M : (i+1)*M]
-            if len(block) < M:
-                break
-            symbols_rx.append(rx.nTuple_former(block, M, B, T))
-        symbols_rx = np.array(symbols_rx)
-        bits_rx = rx.decode_symbols_to_bits(symbols_rx, SF)
-
-        # --- 8. Cálculo de errores
-        #num_symbol_errors = np.sum(symbols_tx[:num_data_symbols] != symbols_rx[:num_data_symbols])
-        #num_bit_errors = np.sum(bits_tx[:num_data_symbols*SF] != bits_rx[:num_data_symbols*SF])
-
-        #SER_tmp_sel[frame_idx] = num_symbol_errors / num_data_symbols
-        #BER_tmp_sel[frame_idx] = num_bit_errors / (num_data_symbols * SF)
-
-        # número de símbolos realmente demodulados
-        num_proc_symbols = len(symbols_rx)
+        #--- 7. Cálculo de errores
+        num_proc_symbols = num_avail
 
         if num_proc_symbols == 0:
             # no se demoduló nada: contar como fallo total

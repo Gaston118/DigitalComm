@@ -54,7 +54,6 @@ def preamble_netid_sfd(M, B, T, preamble_len=8, netid_symbols=(24, 32)):
 #===========================================================================================
 #                          FUNCIONES DE SIMULACIÓN DE CFO
 #===========================================================================================
-
 def inject_cfo(x: np.ndarray, cfo_hz: float, fs_eff: float, start_idx: int = 0) -> np.ndarray:
     if cfo_hz == 0.0:
         return x
