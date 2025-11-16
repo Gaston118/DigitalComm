@@ -10,8 +10,9 @@ T = 1/B                                             # Periodo de muestra
 num_symbols = 2000                                  # Número de símbolos a transmitir
 num_bits = num_symbols * SF                         # Número de bits a transmitir
 bits_tx = np.random.randint(0, 2, size=num_bits)    # Bits a transmitir
-zero_padding = 10                                    # Factor de zero padding en la FFT
+zero_padding = 10                                   # Factor de zero padding en la FFT
 num_data_symbols = num_bits // SF                   # Número de símbolos de datos
+rf_freq = 470e6                                     # 470 MHz
 
 def lora_modulate(symbols_tx, M, B, T):
     preamble, netid, sfd = tx.preamble_netid_sfd(M, B, T)
@@ -106,7 +107,7 @@ for idx, snr_dB in enumerate(EsN0_dB_range):
             continue
         print(f"Sincronización exitosa: x_sync = {x_sync}, preamble_bin = {preamble_bin}, preamble_bin_zp = {preamble_bin_zp}, CFO = {cfo_hz} Hz")
              
-        symbols_rx, num_avail = rx.demod_data(rx_signal, x_sync, num_symbols, M, zero_padding, up_ref, preamble_bin_zp)
+        symbols_rx, num_avail = rx.demod_data(rx_signal, x_sync, num_symbols, M, zero_padding, up_ref, preamble_bin_zp, cfo_hz, rf_freq)
 
         #--- 7. Cálculo de errores
         num_proc_symbols = num_avail
@@ -191,7 +192,7 @@ for idx, snr_dB in enumerate(EsN0_dB_range):
             continue
         print(f"Sincronización exitosa: x_sync = {x_sync}, preamble_bin = {preamble_bin}, preamble_bin_zp = {preamble_bin_zp}, CFO = {cfo_hz} Hz")
 
-        symbols_rx, num_avail = rx.demod_data(rx_signal_sel, x_sync, num_symbols, M, zero_padding, up_ref, preamble_bin_zp)
+        symbols_rx, num_avail = rx.demod_data(rx_signal_sel, x_sync, num_symbols, M, zero_padding, up_ref, preamble_bin_zp, cfo_hz, rf_freq)
 
         #--- 7. Cálculo de errores
         num_proc_symbols = num_avail
