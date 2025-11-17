@@ -119,22 +119,15 @@ def detect(signal, start_idx, Ns, preamble_len, M, zp, up_ref, mag_threshold=Non
 #       Retorna:
 #           x_sync, preamble_bin, preamble_bin_zp, cfo_hz
 #===========================================================================================
-def sync(signal, x_detect, Ns, M, zp, up_ref, down_ref, bw, 
-         preamble_ns_to_avg=(4,5,6,7)):
-    """
-    Window alignment siguiendo LoRaPHY.m
-    
-    Args:
-        rf_freq: Frecuencia portadora (Hz) para calcular SFO
-        bw: Ancho de banda (Hz)
-    """
+def sync(signal, x_detect, Ns, M, zp, up_ref, down_ref, bw=None, preamble_ns_to_avg=(4,5,6,7), use_weighted_avg=True):
+
     L = len(signal)
     if x_detect is None or x_detect < 0:
         return -1, None, None, None
 
     bin_num = int(M * zp)
 
-    # 1) Buscar primer downchirp
+    # 1) Buscar primer downchirp tras x_detect
     x = int(x_detect)
     found = False
     while x < L - Ns:
@@ -142,6 +135,8 @@ def sync(signal, x_detect, Ns, M, zp, up_ref, down_ref, bw,
         mag_d, pk_d_zp, _ = dechirp(signal, x, Ns, M, zp, down_ref)
         if mag_u is None or mag_d is None:
             break
+
+        # Comparar magnitud del pico encontrado en cada espectro
         if abs(mag_d[int(pk_d_zp)]) > abs(mag_u[int(pk_u_zp)]):
             found = True
         x += Ns
@@ -151,117 +146,133 @@ def sync(signal, x_detect, Ns, M, zp, up_ref, down_ref, bw,
     if not found:
         return -1, None, None, None
 
-    # 2) Up-Down Alignment
+    # 2) Avanzar un símbolo
+    if x > L - Ns:
+        return -1, None, None, None
+
+    # 3) Up–Down Alignment (resolución ZP)
     mag_d, pk_d_zp, _ = dechirp(signal, x, Ns, M, zp, down_ref)
     if mag_d is None:
         return -1, None, None, None
 
-    # Convertir bin a offset en muestras (con signo)
-    if pk_d_zp > bin_num // 2:
-        to_samples = int(np.round((pk_d_zp - bin_num) / float(zp)))
-    else:
-        to_samples = int(np.round(pk_d_zp / float(zp)))
-    
+    pkd_signed = pk_d_zp if pk_d_zp <= bin_num // 2 else pk_d_zp - bin_num
+
+    # Convertir a muestras: pkd_signed / zp * (Ns / M)
+    to_samples = int(np.round((pkd_signed / float(zp)) * (Ns / float(M))))
     x = x + to_samples
     x = max(0, min(L - Ns, x))
 
-    # 3) Promedio de preamble bins (método circular)
-    idxs = [x - a * Ns for a in preamble_ns_to_avg if 0 <= x - a * Ns <= L - Ns]
+    # 4) Recolección y promedio de pk_zp en varios up-chirps del preámbulo
+    idxs = []
+    for a in preamble_ns_to_avg:
+        idx = x - a * Ns
+        if 0 <= idx <= L - Ns:
+            idxs.append(idx)
     if len(idxs) == 0:
-        return -1, None, None, None
-
-    pk_zps = []
-    weights = []
-    for idx in idxs:
-        mag_u, pk_u_zp, _ = dechirp(signal, idx, Ns, M, zp, up_ref)
-        if mag_u is None:
-            continue
-        pk_zps.append(float(pk_u_zp))
-        weights.append(float(np.abs(mag_u[int(pk_u_zp)])))
+        xi = x - 4 * Ns
+        if xi < 0:
+            return -1, None, None, None
+        mag_u_ref, pk_u_zp, _ = dechirp(signal, xi, Ns, M, zp, up_ref)
+        if mag_u_ref is None:
+            return -1, None, None, None
+        pk_zps = [int(pk_u_zp)]
+        mags_at_pk = [mag_u_ref[int(pk_u_zp)]]
+    else:
+        pk_zps = []
+        mags_at_pk = []
+        for idx in idxs:
+            mag_u_ref, pk_u_zp, _ = dechirp(signal, idx, Ns, M, zp, up_ref)
+            if mag_u_ref is None:
+                continue
+            pk_zps.append(int(pk_u_zp))
+            # Guardamos la magnitud en ese pico para ponderar
+            mag_val = float(mag_u_ref[int(pk_u_zp)]) if (0 <= int(pk_u_zp) < len(mag_u_ref)) else 0.0
+            mags_at_pk.append(mag_val)
 
     if len(pk_zps) == 0:
         return -1, None, None, None
 
-    # Promedio circular con pesos normalizados
-    pk_zps = np.array(pk_zps)
-    weights = np.array(weights)
-    weights = weights / weights.sum()  # Normalizar
-    
-    angles = 2.0 * np.pi * (pk_zps / bin_num)
-    vec = np.sum(weights[:, np.newaxis] * np.exp(1j * angles[:, np.newaxis]), axis=0)
-    mean_angle = np.angle(vec)
-    mean_pk_zp = (mean_angle / (2.0 * np.pi)) * bin_num
-    if mean_pk_zp < 0:
-        mean_pk_zp += bin_num
+    pk_zps = np.array(pk_zps, dtype=float)
+    mags_at_pk = np.array(mags_at_pk, dtype=float)
 
-    # Refinamiento parabólico en el mejor índice
-    best_idx = idxs[np.argmax(weights * len(weights))]  # Desnormalizar para elegir
-    mag_best, _, _ = dechirp(signal, best_idx, Ns, M, zp, up_ref)
-    if mag_best is not None:
-        pk_int = int(np.round(mean_pk_zp)) % bin_num
-        delta = parabolic_refine(np.abs(mag_best[:bin_num]), pk_int)
-        mean_pk_zp = (mean_pk_zp + delta) % bin_num
+    # Convertimos a fase circular en [0, bin_num) y usamos representación vectorial para promedio
+    angles = 2.0 * np.pi * (pk_zps / float(bin_num))
+    vec = np.sum((np.exp(1j * angles) * (mags_at_pk if use_weighted_avg else 1.0)), axis=0) if use_weighted_avg else np.sum(np.exp(1j * angles), axis=0)
 
-    preamble_bin_zp = mean_pk_zp
-    preamble_bin = int(np.round(mean_pk_zp / zp)) % M
+    # Para evitar división por cero, calculamos promedio de vectores:
+    if use_weighted_avg:
+        w = mags_at_pk.sum()
+        if w == 0:
+            mean_pk_zp = float(np.mean(pk_zps))
+        else:
+            mean_angle = np.angle(vec)
+            mean_pk_zp = (mean_angle / (2.0 * np.pi)) * float(bin_num)
+            if mean_pk_zp < 0:
+                mean_pk_zp += float(bin_num)
+    else:
+        mean_angle = np.angle(np.sum(np.exp(1j * angles)))
+        mean_pk_zp = (mean_angle / (2.0 * np.pi)) * float(bin_num)
+        if mean_pk_zp < 0:
+            mean_pk_zp += float(bin_num)
 
-    # CFO calculation
-    signed_pk = preamble_bin_zp if preamble_bin_zp <= bin_num/2 else preamble_bin_zp - bin_num
-    cfo_hz = (signed_pk / zp / M) * bw
+    # Alternativa simple si el método circular falla (NaN), usar promedio lineal con unwrap
+    if not np.isfinite(mean_pk_zp):
+        # Unwrap linear
+        pkz = pk_zps.copy()
+        # Minimizar la varianza rotando por bin_num
+        pkz_unwrapped = np.unwrap(pkz * 2.0 * np.pi / float(bin_num)) * float(bin_num) / (2.0 * np.pi)
+        mean_pk_zp = float(np.mean(pkz_unwrapped) % float(bin_num))
 
-    # 4) Determinar inicio de datos (SFD alignment)
+    # Convertimos a int y aplicamos refinement parabólico usando la mejor magnitud encontrada
+    pk_zp_int = int(np.round(mean_pk_zp)) % bin_num
+
+    # Elegimos el índice con mayor magnitud registrada
+    best_idx = None
+    if len(mags_at_pk) > 0:
+        best_idx = idxs[int(np.argmax(mags_at_pk))]
+    else:
+        best_idx = idxs[0] if idxs else (x - 4*Ns)
+
+    # Refinamiento parabólico alrededor del pico
+    mag_best, pk_best_zp_from_best, _ = dechirp(signal, best_idx, Ns, M, zp, up_ref)
+    if mag_best is None:
+        pk_zp_refined = float(pk_zp_int)
+    else:
+        bin_num_local = int(M * zp)
+        mag_local = np.abs(mag_best[:bin_num_local])
+        pk_center = int(pk_zp_int % bin_num_local)
+        delta = parabolic_refine(mag_local, pk_center)
+        pk_zp_refined = float(pk_zp_int) + float(delta)
+
+    preamble_bin_zp = int(np.round(pk_zp_refined)) % bin_num
+    preamble_bin_continuous = (pk_zp_refined if pk_zp_refined <= bin_num/2.0 else pk_zp_refined - bin_num) / float(zp)
+
+    # Preamble_bin entero en escala M
+    preamble_bin = int(np.round(pk_zp_refined / float(zp))) % M
+
+    cfo_hz = None
+    if bw is not None:
+        signed_pk_zp = pk_zp_refined if pk_zp_refined <= bin_num/2.0 else pk_zp_refined - bin_num
+        cfo_bins = signed_pk_zp / float(zp)
+        cfo_hz = (cfo_bins / float(M)) * float(bw)
+
+    # 5) SFD: 1.25 vs 2.25 símbolos
     x_prev = x - Ns
     if x_prev < 0:
         return -1, None, None, None
 
-    mag_u, pk_u_zp, _ = dechirp(signal, x_prev, Ns, M, zp, up_ref)
-    mag_d, pk_d_zp, _ = dechirp(signal, x_prev, Ns, M, zp, down_ref)
-    if mag_u is None or mag_d is None:
+    mag_up_prev, pk_up_prev_zp, _ = dechirp(signal, x_prev, Ns, M, zp, up_ref)
+    mag_dn_prev, pk_dn_prev_zp, _ = dechirp(signal, x_prev, Ns, M, zp, down_ref)
+    if mag_up_prev is None or mag_dn_prev is None:
         return -1, None, None, None
 
-    if abs(mag_u[int(pk_u_zp)]) > abs(mag_d[int(pk_d_zp)]):
+    if abs(mag_up_prev[int(pk_up_prev_zp)]) > abs(mag_dn_prev[int(pk_dn_prev_zp)]):
         x_sync = x + int(np.round(2.25 * Ns))
     else:
         x_sync = x + int(np.round(1.25 * Ns))
 
+    x_sync = max(0, min(L - 1, x_sync))
     return x_sync, preamble_bin, preamble_bin_zp, cfo_hz
-
-
-def demod_data(tx_signal, data_start, num_data_symbols, M, ZP, up_ref, 
-               preamble_bin_zp, cfo_hz, rf_freq):
-    """
-    Demodulación con compensación SFO y refinamiento parabólico
-    """
-    total_avail = len(tx_signal) - data_start
-    Nwin = min(total_avail // M * M, num_data_symbols * M)
-    if Nwin == 0:
-        return np.array([], dtype=int), 0
-
-    data_signal = tx_signal[data_start : data_start + Nwin]
-    num_avail = Nwin // M
-    bin_num = M * ZP
-
-    # Calcular drift por SFO (como en LoRaPHY.m)
-    sfo_drift = np.arange(1, num_avail + 1) * M * cfo_hz / rf_freq
-
-    symbols_rx = []
-    for i in range(num_avail):
-        start_i = i * M
-        ft_abs, pk_zp, _ = dechirp(data_signal, start_i, M, M, ZP, up_ref)
-        if ft_abs is None:
-            break
-
-        # Refinamiento parabólico
-        pk_refined = float(pk_zp) + parabolic_refine(ft_abs[:bin_num], int(pk_zp))
-
-        # Compensar CFO y SFO
-        sym_float = (pk_refined - preamble_bin_zp) / float(ZP)
-        sym_compensated = sym_float - sfo_drift[i]
-        
-        sym = int(np.round(sym_compensated)) % M
-        symbols_rx.append(sym)
-
-    return np.array(symbols_rx, dtype=int), len(symbols_rx)
 
 def parabolic_refine(mag, k):
         N = len(mag)
@@ -283,3 +294,33 @@ def parabolic_refine(mag, k):
         elif delta < -0.5:
             delta = -0.5
         return float(delta)
+
+#===========================================================================================
+#                               DEMODULACIÓN DE DATOS
+#===========================================================================================
+#   - Retorna:
+#       symbols_rx: array de símbolos demodulados
+#       num_avail: número de símbolos demodulados
+#===========================================================================================
+def demod_data(tx_signal, data_start, num_data_symbols, M, ZP, up_ref, preamble_bin_zp):
+   
+    total_avail = len(tx_signal) - data_start
+    Nwin_raw = min(total_avail, num_data_symbols * M)
+    Nwin = (Nwin_raw // M) * M
+    if Nwin == 0:
+        return np.array([], dtype=int), 0
+
+    data_signal = tx_signal[data_start : data_start + Nwin]
+    num_avail = Nwin // M
+    bin_num = M * ZP
+
+    symbols_rx = []
+    for i in range(num_avail):
+        start_i = i * M
+        ft_abs, pk_zp, _ = dechirp(data_signal, start_i, M, M, ZP, up_ref)
+        if ft_abs is None:
+            break
+        sym = ((pk_zp + bin_num - int(preamble_bin_zp)) // ZP) % M
+        symbols_rx.append(int(sym))
+
+    return np.array(symbols_rx, dtype=int), len(symbols_rx)
